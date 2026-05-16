@@ -20,6 +20,7 @@ class CoupletTrainer:
 
         # CrossEntropyLoss，忽略 PAD token
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=self.vocab.get_pad_id())
+        self._uses_teacher_forcing = hasattr(self.model, "decoder")
 
     # 单轮训练
     def train_epoch(self, dataloader):
@@ -31,7 +32,8 @@ class CoupletTrainer:
             tgt = tgt.to(self.device)
 
             self.optimizer.zero_grad()
-            logits, _ = self.model(src, tgt, teacher_forcing_ratio=self.config.teacher_forcing_ratio)
+            teacher_forcing_ratio = self.config.teacher_forcing_ratio if self._uses_teacher_forcing else 0.0
+            logits, _ = self.model(src, tgt, teacher_forcing_ratio=teacher_forcing_ratio)
 
             # target: 去掉 <sos>
             target = tgt[:, 1:]
@@ -100,5 +102,5 @@ class CoupletTrainer:
 
     # 加载模型权重
     def load(self, path: Path):
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])

@@ -18,7 +18,7 @@ from models.lstm_model import Seq2SeqCoupletModel as LSTMModel
 from models.gru_model import Seq2SeqGRUModel as GRUModel
 
 # 配置
-MODEL_TYPE = "transformer"  # "transformer", "lstm", "gru"
+MODEL_TYPE = "lstm"  # "transformer", "lstm", "gru"
 
 config = TrainConfig()
 config.save_path = str(Path("outputs") / f"{MODEL_TYPE}_model.pt")
@@ -39,14 +39,14 @@ torch.manual_seed(config.seed)
 if device.type == "cuda":
     torch.cuda.manual_seed_all(config.seed)
 
-# 数据模块
+# dataloader
 data_module = CoupletDataModule(config)
 data_module.setup()
 train_loader = data_module.train_dataloader()
 valid_loader = data_module.valid_dataloader()
 
 # 初始化模型
-if MODEL_TYPE == "transformer":
+if MODEL_TYPE == "lstm":
     model = TransformerCoupletModel(
         vocab_size=len(data_module.vocab),
         pad_id=data_module.vocab.get_pad_id(),
@@ -87,7 +87,7 @@ else:
 trainer = CoupletTrainer(model, config, data_module.vocab, device)
 trainer.fit(train_loader, valid_loader, save_path=Path(config.save_path))
 
-# Generator
+# 推理生成
 generator = CoupletGenerator(model, data_module.vocab, config, device)
 
 test_lines = [
