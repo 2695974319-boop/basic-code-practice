@@ -42,16 +42,33 @@ class Seq2SeqGRUModel(nn.Module):
         self.encoder=EncoderGRU(vocab_size,embed_size,hidden_size,pad_id,dropout)
         self.decoder=AttentionDecoderGRU(vocab_size,embed_size,hidden_size,pad_id,dropout)
 
-    def forward(self,src,tgt=None,teacher_forcing_ratio=0.5,max_len=None):
-        batch_size=src.size(0)
+    def encode(self,src):
         src_mask=src.eq(self.pad_id)
         encoder_outputs,hidden=self.encoder(src)
+        return {
+            "encoder_outputs": encoder_outputs,
+            "state": hidden,
+            "src_mask": src_mask,
+        }
+
+    def decode_step(self,input_token,state,encoder_cache):
+        return self.decoder.forward_step(
+            input_token,
+            state,
+            encoder_cache["encoder_outputs"],
+            encoder_cache["src_mask"],
+        )
+
+    def forward(self,src,tgt=None,teacher_forcing_ratio=0.5,max_len=None):
+        batch_size=src.size(0)
+        encoder_cache=self.encode(src)
+        hidden=encoder_cache["state"]
         decode_len=tgt.size(1)-1 if tgt is not None else max_len if max_len is not None else src.size(1)
         input_token=torch.full((batch_size,1),self.sos_id,dtype=torch.long,device=src.device)
         logits_list=[]
         attentions=[]
         for t in range(decode_len):
-            logits,hidden,attn_weights=self.decoder.forward_step(input_token,hidden,encoder_outputs,src_mask)
+            logits,hidden,attn_weights=self.decode_step(input_token,hidden,encoder_cache)
             logits_list.append(logits)
             attentions.append(attn_weights)
             if tgt is not None and random.random()<teacher_forcing_ratio:

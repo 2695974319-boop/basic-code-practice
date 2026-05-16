@@ -54,16 +54,17 @@ class CoupletTrainer:
         self.model.eval()
         total_loss = 0.0
 
-        for src, tgt in dataloader:
-            src = src.to(self.device)
-            tgt = tgt.to(self.device)
+        with torch.no_grad():
+            for src, tgt in dataloader:
+                src = src.to(self.device)
+                tgt = tgt.to(self.device)
 
-            logits, _ = self.model(src, tgt, teacher_forcing_ratio=0.0)
-            target = tgt[:, 1:]
+                logits, _ = self.model(src, tgt, teacher_forcing_ratio=0.0)
+                target = tgt[:, 1:]
 
-            loss = self.criterion(logits.reshape(-1, logits.size(-1)),
-                                  target.reshape(-1))
-            total_loss += loss.item()
+                loss = self.criterion(logits.reshape(-1, logits.size(-1)),
+                                      target.reshape(-1))
+                total_loss += loss.item()
 
         return total_loss / max(1, len(dataloader))
 
@@ -89,6 +90,8 @@ class CoupletTrainer:
                 best_valid_loss = valid_loss
                 self.save(save_path)
                 print(f"Saved best model to {save_path}")
+
+        return best_valid_loss
 
     # 保存模型
     def save(self, path: Path):

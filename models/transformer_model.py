@@ -53,9 +53,10 @@ class TransformerCoupletModel(nn.Module):
         decode_len=max_len if max_len is not None else src.size(1)
         tgt_input=torch.full((batch_size,1),self.sos_id,dtype=torch.long,device=src.device)
         logits_list=[]
+        encoder_cache=self.encode(src)
 
         for _ in range(decode_len):
-            logits=self._forward_with_tgt_input(src,tgt_input)
+            logits=self.decode_from_memory(encoder_cache,tgt_input)
             next_logits=logits[:,-1:,:]
             logits_list.append(next_logits)
             next_token=next_logits.argmax(dim=-1)
@@ -63,17 +64,33 @@ class TransformerCoupletModel(nn.Module):
 
         return torch.cat(logits_list,dim=1),None
 
-    def _forward_with_tgt_input(self,src,tgt_input):
+    def encode(self,src):
         src_key_padding_mask=src.eq(self.pad_id)
+        src_emb=self.src_embedding(src)*math.sqrt(self.d_model)
+        src_emb=self.positional_encoding(src_emb)
+        memory=self.transformer.encoder(
+            src_emb,
+            src_key_padding_mask=src_key_padding_mask,
+        )
+        return {
+            "memory": memory,
+            "src_key_padding_mask": src_key_padding_mask,
+        }
+
+    def decode_from_memory(self,encoder_cache,tgt_input):
         tgt_key_padding_mask=tgt_input.eq(self.pad_id)
         tgt_mask=self.make_tgt_mask(tgt_input.size(1),tgt_input.device)
-        src_emb=self.src_embedding(src)*math.sqrt(self.d_model)
         tgt_emb=self.tgt_embedding(tgt_input)*math.sqrt(self.d_model)
-        src_emb=self.positional_encoding(src_emb)
         tgt_emb=self.positional_encoding(tgt_emb)
-        transformer_output=self.transformer(src=src_emb,tgt=tgt_emb,
-                                          tgt_mask=tgt_mask,
-                                          src_key_padding_mask=src_key_padding_mask,
-                                          tgt_key_padding_mask=tgt_key_padding_mask,
-                                          memory_key_padding_mask=src_key_padding_mask)
+        transformer_output=self.transformer.decoder(
+            tgt=tgt_emb,
+            memory=encoder_cache["memory"],
+            tgt_mask=tgt_mask,
+            tgt_key_padding_mask=tgt_key_padding_mask,
+            memory_key_padding_mask=encoder_cache["src_key_padding_mask"],
+        )
         return self.output_layer(transformer_output)
+
+    def _forward_with_tgt_input(self,src,tgt_input):
+        encoder_cache=self.encode(src)
+        return self.decode_from_memory(encoder_cache,tgt_input)

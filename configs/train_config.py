@@ -1,26 +1,31 @@
 class TrainConfig:
-    def __init__(self,
-                 dataset_name="wb14123/couplet",
-                 max_samples=50000,
-                 valid_ratio=0.05,
-                 max_len=32,
-                 batch_size=64,
-                 d_model=256,
-                 nhead=8,
-                 num_encoder_layers=3,
-                 num_decoder_layers=3,
-                 dim_feedforward=512,
-                 embed_size=256,
-                 hidden_size=512,
-                 dropout=0.1,
-                 epochs=15,
-                 learning_rate=0.0003,
-                 teacher_forcing_ratio=0.7,
-                 beam_width=5,
-                 repetition_penalty=1.2,
-                 no_repeat_ngram_size=2,
-                 seed=42,
-                 save_path="outputs/model.pt"):
+    def __init__(
+        self,
+        dataset_name="wb14123/couplet",
+        max_samples=50000,
+        valid_ratio=0.05,
+        max_len=32,
+        batch_size=64,
+        d_model=256,
+        nhead=8,
+        num_encoder_layers=3,
+        num_decoder_layers=3,
+        dim_feedforward=512,
+        embed_size=256,
+        hidden_size=512,
+        dropout=0.1,
+        epochs=15,
+        learning_rate=0.0003,
+        teacher_forcing_ratio=0.7,
+        beam_width=5,
+        repetition_penalty=1.2,
+        no_repeat_ngram_size=2,
+        repeat_pattern_weight=0.8,
+        repeat_pattern_hard=True,
+        repeat_pattern_candidate_multiplier=6,
+        seed=42,
+        save_path="outputs/model.pt",
+    ):
         self.dataset_name = dataset_name
         self.max_samples = max_samples
         self.valid_ratio = valid_ratio
@@ -40,5 +45,8 @@ class TrainConfig:
         self.beam_width = beam_width
         self.repetition_penalty = repetition_penalty
         self.no_repeat_ngram_size = no_repeat_ngram_size
+        self.repeat_pattern_weight = repeat_pattern_weight
+        self.repeat_pattern_hard = repeat_pattern_hard
+        self.repeat_pattern_candidate_multiplier = repeat_pattern_candidate_multiplier
         self.seed = seed
         self.save_path = save_path
