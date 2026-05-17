@@ -30,6 +30,18 @@ class TrainConfig:
         repeat_pattern_hard=True,
         repeat_pattern_candidate_multiplier=6,
         generation_reward_weight=0.45,
+        upper_overlap_penalty=1.5,
+        forbid_upper_chars=False,
+        upper_overlap_rerank_weight=0.8,
+        rl_upper_overlap_penalty=1.3,
+        use_lm_fluency=True,
+        lm_fluency_model_name=None,
+        lm_fluency_model_type="causal",
+        lm_fluency_device="cpu",
+        lm_fluency_local_files_only=False,
+        lm_fluency_max_ppl=150.0,
+        lm_fluency_blend_weight=0.85,
+        lm_fluency_lazy_load=True,
         use_rl=False,
         rl_epochs=3,
         rl_learning_rate=None,
@@ -75,6 +87,18 @@ class TrainConfig:
         self.repeat_pattern_hard = repeat_pattern_hard
         self.repeat_pattern_candidate_multiplier = repeat_pattern_candidate_multiplier
         self.generation_reward_weight = generation_reward_weight
+        self.upper_overlap_penalty = upper_overlap_penalty
+        self.forbid_upper_chars = forbid_upper_chars
+        self.upper_overlap_rerank_weight = upper_overlap_rerank_weight
+        self.rl_upper_overlap_penalty = rl_upper_overlap_penalty
+        self.use_lm_fluency = use_lm_fluency
+        self.lm_fluency_model_name = lm_fluency_model_name
+        self.lm_fluency_model_type = lm_fluency_model_type
+        self.lm_fluency_device = lm_fluency_device
+        self.lm_fluency_local_files_only = lm_fluency_local_files_only
+        self.lm_fluency_max_ppl = lm_fluency_max_ppl
+        self.lm_fluency_blend_weight = lm_fluency_blend_weight
+        self.lm_fluency_lazy_load = lm_fluency_lazy_load
         self.use_rl = use_rl
         self.rl_epochs = rl_epochs
         self.rl_learning_rate = rl_learning_rate
@@ -94,6 +118,8 @@ class TrainConfig:
             "pos_alignment": 0.8,
             "punctuation": 0.4,
             "fluency": 0.8,
+            "semantic_fluency": 1.0,
+            "no_cross_repeat": 1.0,
             "imagery": 0.8,
             "reference": 0.5,
         }

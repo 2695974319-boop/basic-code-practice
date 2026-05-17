@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-from metrics.reward_scorer import CoupletRewardScorer
+from metrics.reward_scorer import CoupletRewardScorer, reward_scorer_from_config
 from trainer.trainer import CoupletTrainer
 
 
@@ -22,9 +22,7 @@ class RLCoupletTrainer(CoupletTrainer):
         if rl_lr is None:
             rl_lr = config.learning_rate * 0.2
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=rl_lr)
-        self.reward_scorer = reward_scorer or CoupletRewardScorer(
-            getattr(config, "reward_weights", None)
-        )
+        self.reward_scorer = reward_scorer or reward_scorer_from_config(config)
         self._moving_baseline = None
 
     def train_epoch_rl(self, dataloader):
@@ -159,6 +157,7 @@ class RLCoupletTrainer(CoupletTrainer):
                 raise TypeError("Model must provide decode_step or decode_from_memory.")
 
             filtered_logits = self._filter_content_logits(next_logits)
+            filtered_logits = self._apply_upper_overlap_penalty_batch(filtered_logits, src)
             if sample:
                 token, token_log_prob, token_entropy = self._sample_from_logits(filtered_logits)
             else:
@@ -209,6 +208,33 @@ class RLCoupletTrainer(CoupletTrainer):
         ]
         filtered[:, special_ids] = float("-inf")
         return filtered
+
+    def _upper_char_token_ids_from_src(self, src_row):
+        special_ids = {
+            self.vocab.get_pad_id(),
+            self.vocab.get_sos_id(),
+            self.vocab.get_eos_id(),
+        }
+        return {
+            int(token_id)
+            for token_id in src_row.tolist()
+            if int(token_id) not in special_ids
+        }
+
+    def _apply_upper_overlap_penalty_batch(self, logits, src):
+        penalty = float(getattr(self.config, "rl_upper_overlap_penalty", 1.0))
+        if penalty <= 1.0:
+            return logits
+
+        adjusted = logits.clone()
+        for batch_index in range(src.size(0)):
+            upper_ids = self._upper_char_token_ids_from_src(src[batch_index])
+            for token_id in upper_ids:
+                if adjusted[batch_index, token_id] > 0:
+                    adjusted[batch_index, token_id] /= penalty
+                else:
+                    adjusted[batch_index, token_id] *= penalty
+        return adjusted
 
     def _content_lengths(self, token_batch):
         special = (

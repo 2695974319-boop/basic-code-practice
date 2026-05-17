@@ -1,6 +1,8 @@
 import math
 import re
 
+from .lm_fluency_scorer import LMFluencyScorer
+
 
 class CoupletRewardScorer:
     """
@@ -18,6 +20,8 @@ class CoupletRewardScorer:
         "pos_alignment": 0.8,
         "punctuation": 0.4,
         "fluency": 0.8,
+        "semantic_fluency": 1.0,
+        "no_cross_repeat": 1.0,
         "imagery": 0.8,
         "reference": 0.5,
     }
@@ -81,7 +85,21 @@ class CoupletRewardScorer:
         "f": "dir",
     }
 
-    def __init__(self, weights=None, use_pypinyin=True, use_pos_tagger=True):
+    def __init__(
+        self,
+        weights=None,
+        use_pypinyin=True,
+        use_pos_tagger=True,
+        use_lm_fluency=True,
+        lm_scorer=None,
+        lm_model_name=None,
+        lm_model_type="causal",
+        lm_device=None,
+        lm_local_files_only=False,
+        lm_max_ppl=150.0,
+        lm_blend_weight=0.85,
+        lm_lazy_load=True,
+    ):
         self.weights = dict(self.DEFAULT_WEIGHTS)
         if weights:
             self.weights.update(weights)
@@ -89,6 +107,17 @@ class CoupletRewardScorer:
         self._pinyin = None
         self._style = None
         self._pos_cut = None
+        self._lm_blend_weight = float(lm_blend_weight)
+        self._lm_scorer = lm_scorer
+        if use_lm_fluency and self._lm_scorer is None:
+            self._lm_scorer = LMFluencyScorer(
+                model_name=lm_model_name,
+                model_type=lm_model_type,
+                device=lm_device,
+                max_ppl=lm_max_ppl,
+                local_files_only=lm_local_files_only,
+                lazy_load=lm_lazy_load,
+            )
         if use_pypinyin:
             self._try_load_pypinyin()
         if use_pos_tagger:
@@ -139,8 +168,8 @@ class CoupletRewardScorer:
             pattern.append(first_seen[char])
         return pattern
 
-    def score(self, upper, lower, reference=None):
-        breakdown = self.breakdown(upper, lower, reference)
+    def score(self, upper, lower, reference=None, lm_score=None):
+        breakdown = self.breakdown(upper, lower, reference, lm_score=lm_score)
         total_weight = 0.0
         weighted_sum = 0.0
         for name, value in breakdown.items():
@@ -156,12 +185,19 @@ class CoupletRewardScorer:
     def score_many(self, uppers, lowers, references=None):
         if references is None:
             references = [None] * len(uppers)
+        lm_scores = [None] * len(lowers)
+        if self._lm_scorer is not None:
+            lm_scores = self._lm_scorer.score_batch(
+                [self.normalize(lower) for lower in lowers]
+            )
         return [
-            self.score(upper, lower, reference)
-            for upper, lower, reference in zip(uppers, lowers, references)
+            self.score(upper, lower, reference, lm_score=lm_scores[index])
+            for index, (upper, lower, reference) in enumerate(
+                zip(uppers, lowers, references)
+            )
         ]
 
-    def breakdown(self, upper, lower, reference=None):
+    def breakdown(self, upper, lower, reference=None, lm_score=None):
         upper = self.normalize(upper)
         lower = self.normalize(lower)
         return {
@@ -172,6 +208,8 @@ class CoupletRewardScorer:
             "pos_alignment": self.pos_alignment_score(upper, lower),
             "punctuation": self.punctuation_score(upper, lower),
             "fluency": self.fluency_score(lower, upper),
+            "semantic_fluency": self.semantic_fluency_score(lower, lm_score=lm_score),
+            "no_cross_repeat": self.no_cross_repeat_score(upper, lower),
             "imagery": self.imagery_score(upper, lower),
             "reference": self.reference_score(lower, reference),
         }
@@ -354,14 +392,119 @@ class CoupletRewardScorer:
             if len(upper_pattern) == len(lower_pattern):
                 unexplained_repeat_penalty = 1.0 - self.repeat_pattern_score(upper, lower)
 
+        cross_repeat_penalty = 0.0
+        if upper is not None:
+            cross_repeat_penalty = 1.0 - self.no_cross_repeat_score(upper, lower)
+
         score = (
             1.0
-            - 0.45 * repetition_penalty
-            - 0.30 * repeated_ngram_penalty
-            - 0.20 * special_penalty
-            - 0.25 * unexplained_repeat_penalty
+            - 0.35 * repetition_penalty
+            - 0.25 * repeated_ngram_penalty
+            - 0.15 * special_penalty
+            - 0.20 * unexplained_repeat_penalty
+            - 0.25 * cross_repeat_penalty
         )
         return self._clip01(score)
+
+    def no_cross_repeat_score(self, upper, lower):
+        """Higher when the lower line reuses fewer characters from the upper line."""
+        upper_chars = self.content_chars(upper)
+        lower_chars = self.content_chars(lower)
+        if not lower_chars:
+            return 0.0
+
+        limit = min(len(upper_chars), len(lower_chars))
+        position_overlap = sum(
+            1 for index in range(limit) if upper_chars[index] == lower_chars[index]
+        )
+        position_score = 1.0 - position_overlap / max(1, len(lower_chars))
+
+        upper_set = set(upper_chars)
+        lower_set = set(lower_chars)
+        set_overlap = len(lower_set & upper_set)
+        set_score = 1.0 - set_overlap / max(1, len(lower_set))
+
+        repeated_in_lower = sum(1 for char in lower_chars if char in upper_set)
+        usage_score = 1.0 - repeated_in_lower / max(1, len(lower_chars))
+        return self._clip01(0.4 * position_score + 0.35 * set_score + 0.25 * usage_score)
+
+    def semantic_fluency_score(self, lower, lm_score=None):
+        """
+        Semantic fluency: primarily LM perplexity (lower PPL -> higher score),
+        blended with jieba POS heuristics as fallback/auxiliary signal.
+        """
+        heuristic = self._semantic_fluency_heuristic(lower)
+        if lm_score is None and self._lm_scorer is not None:
+            lm_score = self._lm_scorer.score(self.normalize(lower))
+        if lm_score is None:
+            return heuristic
+
+        blend = self._lm_blend_weight
+        return self._clip01(blend * lm_score + (1.0 - blend) * heuristic)
+
+    def _semantic_fluency_heuristic(self, lower):
+        """Lightweight fallback via jieba segmentation/POS."""
+        lower_chars = self.content_chars(lower)
+        if not lower_chars:
+            return 0.0
+
+        pairs = self.pos_pairs(lower)
+        if not pairs:
+            unique_ratio = len(set(lower_chars)) / len(lower_chars)
+            return self._clip01(0.55 + 0.45 * unique_ratio)
+
+        words = [word for word, _ in pairs]
+        coarse_tags = [self._coarse_pos(tag) for _, tag in pairs]
+
+        covered_chars = sum(len(word) for word in words)
+        coverage = min(1.0, covered_chars / max(1, len(lower_chars)))
+
+        single_word_ratio = sum(1 for word in words if len(word) == 1) / max(1, len(words))
+        cohesion = self._clip01(1.0 - max(0.0, single_word_ratio - 0.45) * 1.8)
+
+        known_pos_ratio = sum(1 for tag in coarse_tags if tag != "x") / max(1, len(coarse_tags))
+        meaningful_tags = {tag for tag in coarse_tags if tag in {"noun", "verb", "adj", "adv", "time", "place"}}
+        tag_diversity = min(1.0, len(meaningful_tags) / 2.0)
+
+        transition_score = self._pos_transition_score(coarse_tags)
+        return self._clip01(
+            0.30 * coverage
+            + 0.25 * cohesion
+            + 0.20 * known_pos_ratio
+            + 0.15 * tag_diversity
+            + 0.10 * transition_score
+        )
+
+    def _pos_transition_score(self, coarse_tags):
+        if len(coarse_tags) <= 1:
+            return 0.6
+
+        plausible = {
+            ("noun", "verb"),
+            ("noun", "adj"),
+            ("noun", "adv"),
+            ("verb", "noun"),
+            ("verb", "adj"),
+            ("verb", "adv"),
+            ("adj", "noun"),
+            ("adv", "verb"),
+            ("adv", "adj"),
+            ("time", "noun"),
+            ("time", "verb"),
+            ("place", "noun"),
+            ("place", "verb"),
+        }
+        valid = 0
+        for left, right in zip(coarse_tags, coarse_tags[1:]):
+            if left == "x" or right == "x":
+                valid += 0.5
+            elif left == right:
+                valid += 0.7
+            elif (left, right) in plausible:
+                valid += 1.0
+            else:
+                valid += 0.45
+        return valid / max(1, len(coarse_tags) - 1)
 
     def imagery_score(self, upper, lower):
         upper_domains = self._domains_for_text(upper)
@@ -417,3 +560,22 @@ class CoupletRewardScorer:
         if math.isnan(value):
             return 0.0
         return max(0.0, min(1.0, float(value)))
+
+
+def reward_scorer_from_config(config=None, weights=None, **kwargs):
+    """Build a reward scorer from TrainConfig fields."""
+    if config is None:
+        return CoupletRewardScorer(weights=weights, **kwargs)
+
+    return CoupletRewardScorer(
+        weights=weights or getattr(config, "reward_weights", None),
+        use_lm_fluency=getattr(config, "use_lm_fluency", True),
+        lm_model_name=getattr(config, "lm_fluency_model_name", None),
+        lm_model_type=getattr(config, "lm_fluency_model_type", "causal"),
+        lm_device=getattr(config, "lm_fluency_device", None),
+        lm_local_files_only=getattr(config, "lm_fluency_local_files_only", False),
+        lm_max_ppl=getattr(config, "lm_fluency_max_ppl", 150.0),
+        lm_blend_weight=getattr(config, "lm_fluency_blend_weight", 0.85),
+        lm_lazy_load=getattr(config, "lm_fluency_lazy_load", True),
+        **kwargs,
+    )
