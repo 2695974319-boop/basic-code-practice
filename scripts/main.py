@@ -18,13 +18,18 @@ from models.lstm_model import Seq2SeqCoupletModel as LSTMModel
 from models.gru_model import Seq2SeqGRUModel as GRUModel
 
 # 配置
-MODEL_TYPE = "lstm"  # "transformer", "lstm", "gru"
+MODEL_TYPE = "lstm"  # "transformer", "lstm", "gru", "bert_lstm"
 
-config = TrainConfig()
+config = TrainConfig(model_type=MODEL_TYPE)
+MODEL_TYPE = config.model_type
 config.save_path = str(Path("outputs") / f"{MODEL_TYPE}_best_model.pt")
 config.rl_save_path = str(Path("outputs") / f"{MODEL_TYPE}_rl_model.pt")
 # 打开后会在监督学习最优模型基础上继续做强化学习微调
 # config.use_rl = True
+# LSTM/GRU/BERT-LSTM 可选: "bahdanau", "luong", "dot", "multihead"
+# config.attention_type = "luong"
+# BERT 需要先安装 transformers；如果只用本地缓存模型，可设为 True
+# config.bert_local_files_only = True
 
 # 设备选择：CUDA > MPS > CPU
 if torch.cuda.is_available():
@@ -35,6 +40,7 @@ else:
     device = torch.device("cpu")
 
 print(f"Using device: {device}")
+print(f"Model type: {MODEL_TYPE} | attention: {config.attention_type} | RL: {config.use_rl}")
 
 # 设置随机种子
 random.seed(config.seed)
@@ -71,7 +77,8 @@ elif MODEL_TYPE == "lstm":
         pad_id=data_module.vocab.get_pad_id(),
         sos_id=data_module.vocab.get_sos_id(),
         eos_id=data_module.vocab.get_eos_id(),
-        dropout=config.dropout
+        dropout=config.dropout,
+        attention_type=config.attention_type,
     )
 elif MODEL_TYPE == "gru":
     model = GRUModel(
@@ -81,7 +88,26 @@ elif MODEL_TYPE == "gru":
         pad_id=data_module.vocab.get_pad_id(),
         sos_id=data_module.vocab.get_sos_id(),
         eos_id=data_module.vocab.get_eos_id(),
-        dropout=config.dropout
+        dropout=config.dropout,
+        attention_type=config.attention_type,
+    )
+elif MODEL_TYPE == "bert_lstm":
+    from models.bert_model import BertSeq2SeqCoupletModel
+
+    model = BertSeq2SeqCoupletModel(
+        vocab_size=len(data_module.vocab),
+        pad_id=data_module.vocab.get_pad_id(),
+        sos_id=data_module.vocab.get_sos_id(),
+        eos_id=data_module.vocab.get_eos_id(),
+        idx2token=data_module.vocab.idx2token,
+        bert_model_name=config.bert_model_name,
+        embed_size=config.embed_size,
+        hidden_size=config.hidden_size,
+        dropout=config.dropout,
+        attention_type=config.attention_type,
+        freeze_bert=config.bert_freeze,
+        local_files_only=config.bert_local_files_only,
+        bert_max_len=config.bert_max_len,
     )
 else:
     raise ValueError("Unsupported MODEL_TYPE")

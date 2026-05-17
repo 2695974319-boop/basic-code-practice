@@ -1,6 +1,7 @@
 class TrainConfig:
     def __init__(
         self,
+        model_type="lstm",
         dataset_name="wb14123/couplet",
         max_samples=50000,
         valid_ratio=0.05,
@@ -14,6 +15,11 @@ class TrainConfig:
         embed_size=256,
         hidden_size=512,
         dropout=0.1,
+        attention_type="bahdanau",
+        bert_model_name="bert-base-chinese",
+        bert_freeze=True,
+        bert_local_files_only=False,
+        bert_max_len=64,
         epochs=15,
         learning_rate=0.0003,
         teacher_forcing_ratio=0.7,
@@ -40,6 +46,7 @@ class TrainConfig:
         save_path="outputs/model.pt",
         rl_save_path=None,
     ):
+        self.model_type = model_type
         self.dataset_name = dataset_name
         self.max_samples = max_samples
         self.valid_ratio = valid_ratio
@@ -53,6 +60,11 @@ class TrainConfig:
         self.embed_size = embed_size
         self.hidden_size = hidden_size
         self.dropout = dropout
+        self.attention_type = attention_type
+        self.bert_model_name = bert_model_name
+        self.bert_freeze = bert_freeze
+        self.bert_local_files_only = bert_local_files_only
+        self.bert_max_len = bert_max_len
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.teacher_forcing_ratio = teacher_forcing_ratio
@@ -79,6 +91,7 @@ class TrainConfig:
             "tone": 1.2,
             "repeat_pattern": 1.0,
             "position_category": 0.7,
+            "pos_alignment": 0.8,
             "punctuation": 0.4,
             "fluency": 0.8,
             "imagery": 0.8,

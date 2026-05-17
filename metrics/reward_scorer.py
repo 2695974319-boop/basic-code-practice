@@ -15,6 +15,7 @@ class CoupletRewardScorer:
         "tone": 1.2,
         "repeat_pattern": 1.0,
         "position_category": 0.7,
+        "pos_alignment": 0.8,
         "punctuation": 0.4,
         "fluency": 0.8,
         "imagery": 0.8,
@@ -55,15 +56,43 @@ class CoupletRewardScorer:
         "number": "一二三四五六七八九十百千万双两半",
     }
 
-    def __init__(self, weights=None, use_pypinyin=True):
+    POS_GROUPS = {
+        "n": "noun",
+        "nr": "noun",
+        "ns": "noun",
+        "nt": "noun",
+        "nz": "noun",
+        "vn": "noun",
+        "v": "verb",
+        "vd": "verb",
+        "vg": "verb",
+        "a": "adj",
+        "ad": "adj",
+        "an": "adj",
+        "d": "adv",
+        "m": "num",
+        "q": "num",
+        "r": "pron",
+        "p": "prep",
+        "c": "conj",
+        "u": "aux",
+        "t": "time",
+        "s": "place",
+        "f": "dir",
+    }
+
+    def __init__(self, weights=None, use_pypinyin=True, use_pos_tagger=True):
         self.weights = dict(self.DEFAULT_WEIGHTS)
         if weights:
             self.weights.update(weights)
         self._char_categories = self._build_char_categories()
         self._pinyin = None
         self._style = None
+        self._pos_cut = None
         if use_pypinyin:
             self._try_load_pypinyin()
+        if use_pos_tagger:
+            self._try_load_pos_tagger()
 
     def _try_load_pypinyin(self):
         try:
@@ -79,6 +108,13 @@ class CoupletRewardScorer:
             for char in chars:
                 char_categories.setdefault(char, set()).add(category)
         return char_categories
+
+    def _try_load_pos_tagger(self):
+        try:
+            import jieba.posseg as posseg
+        except ImportError:
+            return
+        self._pos_cut = posseg.cut
 
     def normalize(self, text):
         return str(text).replace(" ", "").strip()
@@ -133,6 +169,7 @@ class CoupletRewardScorer:
             "tone": self.tone_score(upper, lower),
             "repeat_pattern": self.repeat_pattern_score(upper, lower),
             "position_category": self.position_category_score(upper, lower),
+            "pos_alignment": self.pos_alignment_score(upper, lower),
             "punctuation": self.punctuation_score(upper, lower),
             "fluency": self.fluency_score(lower, upper),
             "imagery": self.imagery_score(upper, lower),
@@ -231,6 +268,61 @@ class CoupletRewardScorer:
             else:
                 scores.append(0.5)
         return self._clip01(sum(scores) / len(scores))
+
+    def pos_alignment_score(self, upper, lower):
+        upper_pairs = self.pos_pairs(upper)
+        lower_pairs = self.pos_pairs(lower)
+        if not upper_pairs or not lower_pairs:
+            # No POS dependency available: neutral fallback
+            return 0.5
+
+        limit = min(len(upper_pairs), len(lower_pairs))
+        if limit == 0:
+            return 0.0
+
+        exact_match = 0.0
+        coarse_match = 0.0
+        for i in range(limit):
+            upper_tag = upper_pairs[i][1]
+            lower_tag = lower_pairs[i][1]
+            if upper_tag == lower_tag:
+                exact_match += 1.0
+                coarse_match += 1.0
+                continue
+            if self._coarse_pos(upper_tag) == self._coarse_pos(lower_tag):
+                coarse_match += 1.0
+
+        length_penalty = abs(len(upper_pairs) - len(lower_pairs)) / max(1, len(upper_pairs))
+        score = 0.65 * (exact_match / limit) + 0.35 * (coarse_match / limit)
+        score *= (1.0 - 0.35 * length_penalty)
+        return self._clip01(score)
+
+    def pos_pairs(self, text):
+        text = self.normalize(text)
+        if not text:
+            return []
+
+        if self._pos_cut is None:
+            return []
+
+        pairs = []
+        for item in self._pos_cut(text):
+            word = str(item.word)
+            flag = str(item.flag)
+            cleaned = "".join(ch for ch in word if ch not in self.PUNCTUATION).strip()
+            if cleaned:
+                pairs.append((cleaned, flag))
+        return pairs
+
+    def _coarse_pos(self, tag):
+        if not tag:
+            return "x"
+        if tag in self.POS_GROUPS:
+            return self.POS_GROUPS[tag]
+        for key, value in self.POS_GROUPS.items():
+            if tag.startswith(key):
+                return value
+        return "x"
 
     def punctuation_score(self, upper, lower):
         upper_positions = self.punctuation_positions(upper)

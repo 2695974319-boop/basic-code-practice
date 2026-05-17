@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import random
+from models.attention import BahdanauAttention, build_attention
 
 class EncoderLSTM(nn.Module):
     def __init__(self,vocab_size,embed_size,hidden_size,pad_id,dropout):
@@ -14,26 +14,12 @@ class EncoderLSTM(nn.Module):
         outputs,(hidden,cell)=self.lstm(embedded)
         return outputs,(hidden,cell)
 
-class BahdanauAttention(nn.Module):
-    def __init__(self,hidden_size):
-        super().__init__()
-        self.W_query=nn.Linear(hidden_size,hidden_size)
-        self.W_keys=nn.Linear(hidden_size,hidden_size)
-        self.V=nn.Linear(hidden_size,1)
-    def forward(self,query,keys,src_mask=None):
-        scores=self.V(torch.tanh(self.W_query(query)+self.W_keys(keys))).squeeze(-1)
-        if src_mask is not None:
-            scores=scores.masked_fill(src_mask,-1e9)
-        weights=F.softmax(scores,dim=-1).unsqueeze(1)
-        context=torch.bmm(weights,keys)
-        return context,weights
-
 class AttentionDecoderLSTM(nn.Module):
-    def __init__(self,vocab_size,embed_size,hidden_size,pad_id,dropout):
+    def __init__(self,vocab_size,embed_size,hidden_size,pad_id,dropout,attention_type="bahdanau"):
         super().__init__()
         self.embedding=nn.Embedding(vocab_size,embed_size,padding_idx=pad_id)
         self.dropout=nn.Dropout(dropout)
-        self.attention=BahdanauAttention(hidden_size)
+        self.attention=build_attention(attention_type,hidden_size)
         self.lstm=nn.LSTM(embed_size+hidden_size,hidden_size,batch_first=True)
         self.out=nn.Linear(hidden_size,vocab_size)
     def forward_step(self,input_token,state,encoder_outputs,src_mask=None):
@@ -47,13 +33,14 @@ class AttentionDecoderLSTM(nn.Module):
         return logits,(hidden,cell),attn_weights
 
 class Seq2SeqCoupletModel(nn.Module):
-    def __init__(self,vocab_size,embed_size,hidden_size,pad_id,sos_id,eos_id,dropout):
+    def __init__(self,vocab_size,embed_size,hidden_size,pad_id,sos_id,eos_id,dropout,attention_type="bahdanau"):
         super().__init__()
         self.pad_id=pad_id
         self.sos_id=sos_id
         self.eos_id=eos_id
+        self.attention_type=attention_type
         self.encoder=EncoderLSTM(vocab_size,embed_size,hidden_size,pad_id,dropout)
-        self.decoder=AttentionDecoderLSTM(vocab_size,embed_size,hidden_size,pad_id,dropout)
+        self.decoder=AttentionDecoderLSTM(vocab_size,embed_size,hidden_size,pad_id,dropout,attention_type)
 
     def encode(self,src):
         src_mask=src.eq(self.pad_id)

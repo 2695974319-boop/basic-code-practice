@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import random
 
-from models.lstm_model import BahdanauAttention
+from models.attention import build_attention
 
 class EncoderGRU(nn.Module):
     def __init__(self,vocab_size,embed_size,hidden_size,pad_id,dropout):
@@ -17,11 +16,11 @@ class EncoderGRU(nn.Module):
         return outputs,hidden
 
 class AttentionDecoderGRU(nn.Module):
-    def __init__(self,vocab_size,embed_size,hidden_size,pad_id,dropout):
+    def __init__(self,vocab_size,embed_size,hidden_size,pad_id,dropout,attention_type="bahdanau"):
         super().__init__()
         self.embedding=nn.Embedding(vocab_size,embed_size,padding_idx=pad_id)
         self.dropout=nn.Dropout(dropout)
-        self.attention=BahdanauAttention(hidden_size)
+        self.attention=build_attention(attention_type,hidden_size)
         self.gru=nn.GRU(embed_size+hidden_size,hidden_size,batch_first=True)
         self.out=nn.Linear(hidden_size,vocab_size)
     def forward_step(self,input_token,hidden,encoder_outputs,src_mask=None):
@@ -34,13 +33,14 @@ class AttentionDecoderGRU(nn.Module):
         return logits,hidden,attn_weights
 
 class Seq2SeqGRUModel(nn.Module):
-    def __init__(self,vocab_size,embed_size,hidden_size,pad_id,sos_id,eos_id,dropout):
+    def __init__(self,vocab_size,embed_size,hidden_size,pad_id,sos_id,eos_id,dropout,attention_type="bahdanau"):
         super().__init__()
         self.pad_id=pad_id
         self.sos_id=sos_id
         self.eos_id=eos_id
+        self.attention_type=attention_type
         self.encoder=EncoderGRU(vocab_size,embed_size,hidden_size,pad_id,dropout)
-        self.decoder=AttentionDecoderGRU(vocab_size,embed_size,hidden_size,pad_id,dropout)
+        self.decoder=AttentionDecoderGRU(vocab_size,embed_size,hidden_size,pad_id,dropout,attention_type)
 
     def encode(self,src):
         src_mask=src.eq(self.pad_id)
