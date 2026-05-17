@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from metrics.reward_scorer import CoupletRewardScorer
+
 
 class CoupletGenerator:
     def __init__(self, model, vocab, config, device):
@@ -9,6 +11,7 @@ class CoupletGenerator:
         self.vocab = vocab
         self.config = config
         self.device = device
+        self.reward_scorer = CoupletRewardScorer(getattr(config, "reward_weights", None))
 
     def _cfg(self, name, default):
         return getattr(self.config, name, default)
@@ -124,18 +127,24 @@ class CoupletGenerator:
                     penalty += 1
         return penalty
 
-    def _rerank_score(self, token_ids, log_prob_sum, desired_len, upper_pattern):
+    def _rerank_score(self, token_ids, log_prob_sum, desired_len, upper_pattern, upper_text=None):
         text_ids = self._content_ids(token_ids)
         length_gap = abs(len(text_ids) - desired_len)
         unique_count = len(set(text_ids))
         repetition_count = len(text_ids) - unique_count
         pattern_penalty = self._repeat_pattern_penalty(token_ids, upper_pattern)
-        return (
+        score = (
             log_prob_sum
             - 0.6 * length_gap
             - 0.2 * repetition_count
             - float(self._cfg("repeat_pattern_weight", 0.8)) * pattern_penalty
         )
+        reward_weight = float(self._cfg("generation_reward_weight", 0.0))
+        if reward_weight > 0.0 and upper_text is not None:
+            lower_text = self.vocab.decode(token_ids)
+            reward = self.reward_scorer.score(upper_text, lower_text)
+            score += reward_weight * max(1, desired_len) * reward
+        return score
 
     def _candidate_token_ids(self, log_probs, prefix_ids, upper_pattern, beam_width):
         pool_size = min(
@@ -202,7 +211,13 @@ class CoupletGenerator:
                     break
 
                 all_candidates.sort(
-                    key=lambda item: self._rerank_score(item[0], item[1], desired_len, upper_pattern),
+                    key=lambda item: self._rerank_score(
+                        item[0],
+                        item[1],
+                        desired_len,
+                        upper_pattern,
+                        normalized_up,
+                    ),
                     reverse=True,
                 )
                 beams = all_candidates[:beam_width]
@@ -212,7 +227,13 @@ class CoupletGenerator:
 
             best_ids, _, _, _ = max(
                 beams,
-                key=lambda item: self._rerank_score(item[0], item[1], desired_len, upper_pattern),
+                key=lambda item: self._rerank_score(
+                    item[0],
+                    item[1],
+                    desired_len,
+                    upper_pattern,
+                    normalized_up,
+                ),
             )
             if best_ids[-1] != eos_id:
                 best_ids = best_ids + [eos_id]

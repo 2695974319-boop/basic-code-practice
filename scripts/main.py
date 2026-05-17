@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from configs.train_config import TrainConfig
 from data.dataset import CoupletDataModule
 from trainer.trainer import CoupletTrainer
+from trainer.rl_trainer import RLCoupletTrainer
 from generator.generator import CoupletGenerator
 
 from models.transformer_model import TransformerCoupletModel
@@ -21,6 +22,9 @@ MODEL_TYPE = "lstm"  # "transformer", "lstm", "gru"
 
 config = TrainConfig()
 config.save_path = str(Path("outputs") / f"{MODEL_TYPE}_best_model.pt")
+config.rl_save_path = str(Path("outputs") / f"{MODEL_TYPE}_rl_model.pt")
+# 打开后会在监督学习最优模型基础上继续做强化学习微调
+# config.use_rl = True
 
 # 设备选择：CUDA > MPS > CPU
 if torch.cuda.is_available():
@@ -87,6 +91,19 @@ trainer = CoupletTrainer(model, config, data_module.vocab, device)
 best_valid_loss = trainer.fit(train_loader, valid_loader, save_path=Path(config.save_path))
 trainer.load(Path(config.save_path))
 print(f"Loaded best model from {config.save_path} | best_valid_loss={best_valid_loss:.4f}")
+
+if config.use_rl:
+    rl_trainer = RLCoupletTrainer(model, config, data_module.vocab, device)
+    best_valid_reward = rl_trainer.fit_rl(
+        train_loader,
+        valid_loader,
+        save_path=Path(config.rl_save_path),
+    )
+    rl_trainer.load(Path(config.rl_save_path))
+    print(
+        f"Loaded best RL model from {config.rl_save_path} "
+        f"| best_valid_reward={best_valid_reward:.4f}"
+    )
 
 # 推理生成
 generator = CoupletGenerator(model, data_module.vocab, config, device)

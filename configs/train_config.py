@@ -23,8 +23,22 @@ class TrainConfig:
         repeat_pattern_weight=0.8,
         repeat_pattern_hard=True,
         repeat_pattern_candidate_multiplier=6,
+        generation_reward_weight=0.45,
+        use_rl=False,
+        rl_epochs=3,
+        rl_learning_rate=None,
+        rl_supervised_loss_weight=0.5,
+        rl_policy_loss_weight=1.0,
+        rl_entropy_weight=0.01,
+        rl_grad_clip=1.0,
+        rl_sample_top_k=50,
+        rl_baseline_momentum=0.9,
+        rl_normalize_advantage=True,
+        rl_valid_batches=0,
+        reward_weights=None,
         seed=42,
         save_path="outputs/model.pt",
+        rl_save_path=None,
     ):
         self.dataset_name = dataset_name
         self.max_samples = max_samples
@@ -48,5 +62,28 @@ class TrainConfig:
         self.repeat_pattern_weight = repeat_pattern_weight
         self.repeat_pattern_hard = repeat_pattern_hard
         self.repeat_pattern_candidate_multiplier = repeat_pattern_candidate_multiplier
+        self.generation_reward_weight = generation_reward_weight
+        self.use_rl = use_rl
+        self.rl_epochs = rl_epochs
+        self.rl_learning_rate = rl_learning_rate
+        self.rl_supervised_loss_weight = rl_supervised_loss_weight
+        self.rl_policy_loss_weight = rl_policy_loss_weight
+        self.rl_entropy_weight = rl_entropy_weight
+        self.rl_grad_clip = rl_grad_clip
+        self.rl_sample_top_k = rl_sample_top_k
+        self.rl_baseline_momentum = rl_baseline_momentum
+        self.rl_normalize_advantage = rl_normalize_advantage
+        self.rl_valid_batches = rl_valid_batches
+        self.reward_weights = reward_weights or {
+            "length": 1.2,
+            "tone": 1.2,
+            "repeat_pattern": 1.0,
+            "position_category": 0.7,
+            "punctuation": 0.4,
+            "fluency": 0.8,
+            "imagery": 0.8,
+            "reference": 0.5,
+        }
         self.seed = seed
         self.save_path = save_path
+        self.rl_save_path = rl_save_path
