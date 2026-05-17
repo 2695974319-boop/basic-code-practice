@@ -31,6 +31,8 @@ class LMFluencyScorer:
         self._model = None
         self._tokenizer = None
         self._resolved_device = None
+        self._use_amp = False
+        self._amp_dtype = None
         self._load_failed = False
 
         if not lazy_load:
@@ -107,6 +109,17 @@ class LMFluencyScorer:
                 )
             self._model.to(device)
             self._model.eval()
+            self._use_amp = False
+            self._amp_dtype = None
+            if device == "cuda":
+                # Prefer bf16 on Ada GPUs like 4090 for fast and stable inference.
+                if torch.cuda.is_bf16_supported():
+                    self._use_amp = True
+                    self._amp_dtype = torch.bfloat16
+                else:
+                    self._use_amp = True
+                    self._amp_dtype = torch.float16
+            print(f"[LMFluencyScorer] loaded {model_name} on device={device}")
             return True
         except Exception:
             self._load_failed = True
@@ -138,8 +151,12 @@ class LMFluencyScorer:
         if inputs["input_ids"].size(1) < 2:
             return None
 
-        with torch.no_grad():
-            outputs = self._model(**inputs, labels=inputs["input_ids"])
+        with torch.inference_mode():
+            if self._use_amp:
+                with torch.autocast(device_type="cuda", dtype=self._amp_dtype):
+                    outputs = self._model(**inputs, labels=inputs["input_ids"])
+            else:
+                outputs = self._model(**inputs, labels=inputs["input_ids"])
             loss = float(outputs.loss.item())
 
         return math.exp(loss)
@@ -163,13 +180,17 @@ class LMFluencyScorer:
 
         total_loss = 0.0
         count = 0
-        with torch.no_grad():
+        with torch.inference_mode():
             for pos in range(1, input_ids.size(1) - 1):
                 masked_input = input_ids.clone()
                 labels = torch.full_like(input_ids, -100)
                 labels[0, pos] = input_ids[0, pos]
                 masked_input[0, pos] = mask_id
-                outputs = self._model(masked_input, labels=labels)
+                if self._use_amp:
+                    with torch.autocast(device_type="cuda", dtype=self._amp_dtype):
+                        outputs = self._model(masked_input, labels=labels)
+                else:
+                    outputs = self._model(masked_input, labels=labels)
                 if outputs.loss is not None:
                     total_loss += float(outputs.loss.item())
                     count += 1

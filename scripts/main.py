@@ -41,6 +41,8 @@ else:
 
 print(f"Using device: {device}")
 print(f"Model type: {MODEL_TYPE} | attention: {config.attention_type} | RL: {config.use_rl}")
+config.lm_fluency_device = device.type
+print(f"LM fluency scorer device: {config.lm_fluency_device}")
 
 # 设置随机种子
 random.seed(config.seed)

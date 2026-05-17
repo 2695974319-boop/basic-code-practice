@@ -7,6 +7,10 @@ class TrainConfig:
         valid_ratio=0.05,
         max_len=32,
         batch_size=64,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2,
         d_model=256,
         nhead=8,
         num_encoder_layers=3,
@@ -37,12 +41,12 @@ class TrainConfig:
         use_lm_fluency=True,
         lm_fluency_model_name=None,
         lm_fluency_model_type="causal",
-        lm_fluency_device="cpu",
+        lm_fluency_device="cuda",
         lm_fluency_local_files_only=False,
         lm_fluency_max_ppl=150.0,
         lm_fluency_blend_weight=0.85,
         lm_fluency_lazy_load=True,
-        use_rl=False,
+        use_rl=True,
         rl_epochs=3,
         rl_learning_rate=None,
         rl_supervised_loss_weight=0.5,
@@ -55,6 +59,9 @@ class TrainConfig:
         rl_valid_batches=0,
         reward_weights=None,
         seed=42,
+        use_amp=True,
+        amp_dtype="auto",
+        cudnn_benchmark=True,
         save_path="outputs/model.pt",
         rl_save_path=None,
     ):
@@ -64,6 +71,10 @@ class TrainConfig:
         self.valid_ratio = valid_ratio
         self.max_len = max_len
         self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        self.prefetch_factor = prefetch_factor
         self.d_model = d_model
         self.nhead = nhead
         self.num_encoder_layers = num_encoder_layers
@@ -124,5 +135,8 @@ class TrainConfig:
             "reference": 0.5,
         }
         self.seed = seed
+        self.use_amp = use_amp
+        self.amp_dtype = amp_dtype
+        self.cudnn_benchmark = cudnn_benchmark
         self.save_path = save_path
         self.rl_save_path = rl_save_path
